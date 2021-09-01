@@ -1,0 +1,117 @@
+
+```{r}
+library(scales)
+library(arrow)
+library(tidyverse)
+library(ggrepel)
+library(nflfastR)
+library(ggpmisc)
+library(brms)
+options(mc.cores = parallel::detectCores())
+set.seed(2009)
+# dir.create("nflfastr")
+# get_data <- function(year){
+#   dir.create(file.path("nflfastr", year))
+#   download.file(
+#     glue::glue("https://github.com/guga31bb/nflfastR-data/blob/master/data/play_by_play_{year}.parquet?raw=true"),
+#     file.path("nflfastr", year, "data.parquet"),
+#     mode = 'wb'
+#   )
+# }
+# walk(1999:2020, get_data)
+ds <- open_dataset("nflfastr", partitioning = "year")
+
+ds %>%
+  select(
+year, desc, posteam, epa, xpass, penalty, pass, rush, qb_scramble) %>%
+  filter(year >= 2018, penalty == 0,!is.na(epa), pass == 1 | rush == 1) %>%
+# filter(qb_scramble == 0) %>%
+  collect() -> pbp
+```
+
+```{r}
+pbp %>%
+  filter(posteam == "BAL", !is.na(xpass)) %>%
+  select(-year,-rush, -penalty) -> pbp2
+```
+
+```{r}
+pbp2 %>%
+  mutate(scaled_epa = scale(epa),
+         scaled_xpass = scale(xpass),
+         pass = as.factor(pass)) %>%
+  select(scaled_epa, scaled_xpass, pass) -> pbp3
+```
+
+```{r}
+get_prior(data = pbp3, family = gaussian, formula = scaled_epa ~ s(scaled_xpass, by = pass))
+```
+
+```{r}
+brm(
+  data = pbp3,
+  family = gaussian,
+  formula = scaled_epa ~ pass + s(scaled_xpass, by = pass),
+  cores = 4,
+  chains = 4,
+  backend = "cmdstanr",
+  prior = prior(normal(0, 1), b),
+  prior(exponential(1), sigma)
+) -> model_1
+
+model_1 <- update(model_1, cores = 4, chains = 4, backend = "cmdstanr", newdata = pbp3)
+
+```
+
+```{r}
+nflfastR::teams_colors_logos -> team_colors
+
+#this is the data that we'll simulate over
+tibble(xpass = rep(0:100, times=2, each=1), pass = rep(0:1, each = 101)) -> pbp4
+
+pbp4 %>%
+  mutate(scaled_xpass = scale(xpass)) -> pbp5
+
+#this is the real meat right here: we sim for every value of xpass for both
+#passes and rushes
+fitted(model_1, newdata = pbp5) %>% as_tibble() %>% bind_cols(pbp5) -> pbp6 
+
+
+pbp6 %>%
+  rename(lower_bound = Q2.5, upper_bound = Q97.5) %>%
+  select(Estimate, lower_bound, upper_bound, xpass, pass) %>%
+  pivot_wider(values_from = c(Estimate, lower_bound, upper_bound), names_from = pass, names_prefix = "pass_") %>%
+    mutate(Estimate_pass_1 = Estimate_pass_1 * sd(pbp2$epa) + mean(pbp2$epa),
+         Estimate_pass_0 = Estimate_pass_0 * sd(pbp2$epa) + mean(pbp2$epa)) -> pbp7
+
+pbp7 %>%
+  mutate(team_abbr = "BAL") %>%
+  left_join(team_colors) -> pbp7
+
+pbp7 %>%
+  ggplot(aes(x = xpass, y = Estimate_pass_0)) +
+  geom_line(color = pbp7$team_color2) +
+  geom_line(aes(y = Estimate_pass_1), color = pbp7$team_color) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed", alpha=0.5) +
+  labs(x = "Expected Pass",
+       y = "EPA per play",
+       title = "Pass vs Rush",
+       subtitle = "Baltimore Ravens, 2018-2020",
+       caption = "Data: @nflfastR") +
+  #uses the black and white ggplot theme
+  theme_bw() +
+  #center title with hjust = 0.5
+  theme(
+    plot.title = element_text(size = 14, hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(size = 11, hjust = 0.5)
+  ) +
+  #make ticks look nice
+  #if this doesn't work, `install.packages('scales')`
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  geom_text_repel(data = filter(pbp7, xpass == 100), aes( y = Estimate_pass_1), label = "Pass", box.padding = .1, min.segment.length = 10, nudge_y = 0.1) +
+  geom_text_repel(data = filter(pbp7, xpass == 100), aes( y = Estimate_pass_0), label = "Rush", box.padding = 2, min.segment.length = 10) -> pass_v_rush_graph
+
+ggsave(pass_v_rush_graph, filename = "team.png", dpi = "retina", width = 16, height = 9)
+```
+
