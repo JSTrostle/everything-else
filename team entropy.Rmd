@@ -1,0 +1,97 @@
+```{r}
+library(tidyverse)
+library(nflreadr)
+library(ggimage)
+library(nflplotR)
+library(nflfastR)
+library(ggthemes)
+load_pbp(2021) -> pbp
+
+pbp %>%
+  select(desc, posteam, receiver, pass, season) %>%
+  filter(!is.na(receiver), !is.na(posteam)) -> pbp2
+
+pbp2 %>%
+  group_by(receiver, posteam, season) %>%
+  summarise(team = last(posteam),
+    targets = sum(pass)) %>%
+  ungroup() %>%
+  group_by(team, season) %>%
+  #I limit it to a teams top 6 WRs.If you don't do this, the entropy value
+  #gets a little weird
+  slice_max(n = 6, order_by = targets, with_ties = F) %>%
+  mutate(total_passes = sum(targets),
+         share = targets / total_passes) %>%
+  ungroup() -> pbp5
+  
+
+pbp5 %>%
+  group_by(team, season) %>%
+  #this is shannon entropy, expressed in bits
+  summarise(ent = -sum(ifelse(share == 0, 0, share * log(share)))) -> pbp6
+
+pbp %>%
+  group_by(posteam, season) %>%
+  summarise(passes = sum(pass),
+            cpoe = cpoe,
+            epa = epa) %>%
+  filter(passes > 60) %>%
+  summarise(epa = mean(epa, na.rm = T),
+            cpoe = mean(cpoe, na.rm = T)) %>%
+  ungroup() %>%
+  rename(team = posteam) -> teams
+  
+
+pbp6 %>%
+  left_join(teams) -> teams2
+```
+
+```{r}
+#This calculates the maximum entropy for 6 receivers
+#For more receivers, it would be 1/n repeated n times
+
+t <- tibble(value = c(1/6,1/6,1/6,1/6,1/6,1/6))
+
+t %>%
+mutate(ent = -sum(ifelse(value == 0, 0, value * log(value)))) -> t2
+
+
+```
+
+```{r}
+teams2 %>%
+  mutate(entropy = ent *100 / 1.791759) %>% # 1.791759 is max entropy
+  left_join(teams_colors_logos, by = c('team' = 'team_abbr'))-> teams3
+```
+
+```{r}
+
+
+teams3 %>%
+# filter(season == 2021) %>%
+#  slice_max(n = 1, order_by = -entropy, with_ties = F) %>%
+ggplot( aes(x = reorder(team, ent), y = entropy)) +
+  geom_segment( aes(x=reorder(team, ent), xend=reorder(team, -ent), y=min(teams3$entropy) - 3, yend=entropy, color = team, alpha = 0.4)) +
+  geom_image(aes(image = team_logo_espn), size = 1/32, asp = 16 / 9) +
+  scale_color_nfl(type = "secondary") +
+  scale_fill_nfl(alpha = 0.1) +
+  geom_hline(yintercept = 100) +
+  labs(
+    title = "2021 NFL passing concentration",
+    y = "Percent of possible dispersion",
+    subtitle = "The lower a team is, the more concentrated its passing attack. Zero dispersion means all targets went to one WR"
+  ) +
+  theme_few() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.title.position = "plot",
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "none"
+  ) + 
+  scale_y_continuous(limits = c(min(teams3$entropy) - 3 ,100), expand = c(0,0), breaks = scales::pretty_breaks(n = 10)) -> entroyp
+
+ggsave(entroyp, filename = "pass_concentration.png", dpi = 300, height = 9, width = 16)
+```
+
