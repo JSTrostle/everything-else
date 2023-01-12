@@ -1,0 +1,204 @@
+```{r}
+library(tidyverse)
+library(nflreadr)
+library(nflplotR)
+library(ggthemes)
+
+
+load_pbp(2022) -> pbp
+
+pbp %>%
+  select(desc, posteam, receiver, pass, season) %>%
+  filter(!is.na(receiver), !is.na(posteam)) -> pbp2
+pbp2 %>%
+  group_by(receiver, posteam, season) %>%
+  summarise(team = last(posteam),
+    targets = sum(pass)) %>%
+  ungroup() %>%
+  group_by(team, season) %>%
+  #I limit it to a teams top 6 WRs.If you don't do this, the entropy value
+  #gets a little weird
+  slice_max(n = 6, order_by = targets, with_ties = F) %>%
+  mutate(total_passes = sum(targets),
+         share = targets / total_passes) %>%
+  ungroup() -> pbp5
+  
+pbp5 %>%
+  group_by(team, season) %>%
+  #this is shannon entropy, expressed in bits
+  summarise(ent = -sum(ifelse(share == 0, 0, share * log(share)))) -> pbp6
+pbp %>%
+  group_by(posteam, season) %>%
+  summarise(passes = sum(pass),
+            cpoe = cpoe,
+            epa = epa) %>%
+  filter(passes > 60) %>%
+  summarise(epa = mean(epa, na.rm = T),
+            cpoe = mean(cpoe, na.rm = T)) %>%
+  ungroup() %>%
+  rename(team = posteam) -> teams
+  
+pbp6 %>%
+  left_join(teams) -> teams2
+```
+
+```{r}
+#This calculates the maximum entropy for 6 receivers
+#For more receivers, it would be 1/n repeated n times
+t <- tibble(value = c(1/6,1/6,1/6,1/6,1/6,1/6))
+t %>%
+mutate(ent = -sum(ifelse(value == 0, 0, value * log(value)))) -> t2
+```
+
+```{r}
+teams2 %>%
+  mutate(entropy = ent *100 / 1.791759) -> teams3
+```
+
+```{r}
+teams3 %>%
+#  slice_max(n = 1, order_by = -entropy, with_ties = F) %>%
+ggplot( aes(x = reorder(team, ent), y = entropy)) +
+  geom_segment( aes(x=reorder(team, ent), xend=reorder(team, -ent), y=min(teams3$entropy) - 3, yend=entropy, color = team, alpha = 0.4)) +
+  geom_nfl_logos(aes(team_abbr = team), width = 0.045) +
+  scale_color_nfl(type = "secondary") +
+  scale_fill_nfl(alpha = 0.1) +
+  geom_hline(yintercept = 100) +
+  labs(
+    title = "2022 NFL passing concentration",
+    y = "Percent of possible dispersion",
+    subtitle = "The lower a team is, the more concentrated its passing attack. Zero dispersion means all targets went to one WR"
+  ) +
+  theme_few() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.title.position = "plot",
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "none"
+  ) + 
+  scale_y_continuous(limits = c(min(teams3$entropy) - 3 ,100), expand = c(0,0), breaks = scales::pretty_breaks(n = 10)) -> entroyp
+ggsave(entroyp, filename = "pass_concentration_2022.png", dpi = 300, height = 9, width = 16)
+
+````
+
+
+```{r}
+load_pbp(2021) -> pbp_2021
+
+pbp_2021 %>%
+  select(desc, posteam, receiver, pass, season) %>%
+  filter(!is.na(receiver), !is.na(posteam)) -> pbp2_2021
+pbp2_2021 %>%
+  group_by(receiver, posteam, season) %>%
+  summarise(team = last(posteam),
+    targets = sum(pass)) %>%
+  ungroup() %>%
+  group_by(team, season) %>%
+  #I limit it to a teams top 6 WRs.If you don't do this, the entropy value
+  #gets a little weird
+  slice_max(n = 6, order_by = targets, with_ties = F) %>%
+  mutate(total_passes = sum(targets),
+         share = targets / total_passes) %>%
+  ungroup() -> pbp5_2021
+  
+pbp5_2021 %>%
+  group_by(team, season) %>%
+  #this is shannon entropy, expressed in bits
+  summarise(ent = -sum(ifelse(share == 0, 0, share * log(share)))) -> pbp6_2021
+pbp_2021 %>%
+  group_by(posteam, season) %>%
+  summarise(passes = sum(pass),
+            cpoe = cpoe,
+            epa = epa) %>%
+  filter(passes > 60) %>%
+  summarise(epa = mean(epa, na.rm = T),
+            cpoe = mean(cpoe, na.rm = T)) %>%
+  ungroup() %>%
+  rename(team = posteam) -> teams_2021
+  
+pbp6_2021 %>%
+  left_join(teams_2021) -> teams2_2021
+```
+
+```{r}
+teams2_2021 %>%
+  mutate(entropy = ent *100 / 1.791759) -> teams3_2021
+```
+
+```{r}
+teams3_2021 %>%
+#  slice_max(n = 1, order_by = -entropy, with_ties = F) %>%
+ggplot( aes(x = reorder(team, ent), y = entropy)) +
+  geom_segment( aes(x=reorder(team, ent), xend=reorder(team, -ent), y=min(teams3$entropy) - 3, yend=entropy, color = team, alpha = 0.4)) +
+  geom_nfl_logos(aes(team_abbr = team), width = 0.045) +
+  scale_color_nfl(type = "secondary") +
+  scale_fill_nfl(alpha = 0.1) +
+  geom_hline(yintercept = 100) +
+  labs(
+    title = "2022 NFL passing concentration",
+    y = "Percent of possible dispersion",
+    subtitle = "The lower a team is, the more concentrated its passing attack. Zero dispersion means all targets went to one WR"
+  ) +
+  theme_few() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.title.position = "plot",
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "none"
+  ) + 
+  scale_y_continuous(limits = c(min(teams3$entropy) - 3 ,100), expand = c(0,0), breaks = scales::pretty_breaks(n = 10)) -> entroyp_2021
+ggsave(entroyp, filename = "pass_concentration_2022.png", dpi = 300, height = 9, width = 16)
+
+````
+
+
+```{r}
+#Is this just hacked together like nobody's business? you bet
+teams3_2021 |> 
+  select(team, ent, entropy) |> 
+  rename(ent_2021 = ent, entropy_2021 = entropy) |> 
+  ungroup() -> teams4_2021
+
+teams4_2021 |> 
+  left_join(teams3) -> teams5
+```
+
+```{r}
+teams5 |> 
+mutate(val = entropy - entropy_2021,
+  team = fct_reorder(team, -val)) |> 
+ggplot(aes()) +
+  geom_segment(aes(color = team, x=team, xend=team, y=entropy_2021, yend=entropy)) +
+  geom_nfl_wordmarks( aes(x=team, y=entropy_2021, team_abbr = team), height = 0.1, width = 0.075 ) +
+  geom_nfl_logos( aes(x=team, y=entropy, team_abbr = team), width = 0.03  ) +
+  coord_flip() +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 4)) +
+  scale_color_nfl(type = "secondary") +
+  scale_fill_nfl(alpha = 0.4) +
+  labs(
+    title = "2021 and 2022 NFL passing concentration",
+    y = "Percent of possible dispersion",
+    subtitle = "Wordmark = 2021, logo = 2022 | arranged by decrease in dispersion",
+    caption = "Data = nflreadr | plot = nflplotr | author = @jonas_trostle@mastodon.online"
+  ) +
+  theme_fivethirtyeight() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.title.position = "plot",
+    # it's obvious what the y-axis is so we remove the title
+    axis.title.x = element_text(),
+    # this line triggers the replacement of team abbreviations with logos
+    axis.text.y = element_blank(),
+    axis.ticks =element_blank(),
+    panel.border = element_blank(),
+    panel.background = element_blank()
+  ) -> entropy_plot
+
+ggsave(entropy_plot, filename = "pass_concentration_2022_vs_2021.png", dpi = 300, height = 9, width = 16)
+
+```
+
